@@ -57,6 +57,8 @@ class And(schema.And):
 
 class Optional(schema.Optional):
     def __eq__(self, other: Self) -> bool:
+        if not isinstance(other, Optional):
+            return NotImplemented
         return self._schema == other._schema
 
     def __hash__(self):
@@ -80,25 +82,39 @@ class Schema(schema.Schema):
                 ALTERNATIVE: replace with Or(parent's schema, child's schema)
         """
         assert isinstance(other, Schema), "Can only merge a Schema with another Schema"
-        for key in other.schema:
-            if key in self.schema:
-                match conflict:
-                    case MergeFlags.KEEP:
-                        pass
-                    case MergeFlags.EXCEPTION:
-                        raise schema.SchemaError(f"Key collision for {key}")
-                    case MergeFlags.OVERWRITE:
-                        self.schema[key] = other.schema[key]
-                    case MergeFlags.ALTERNATIVE:
-                        if isinstance(self.schema[key], dict) and isinstance(other.schema[key], dict):
-                            self.schema[key] |= other.schema[key]
-                        elif isinstance(self.schema[key], Schema) and isinstance(other.schema[key], Schema):
-                            self.schema[key] |= other.schema[key]
-                        else:
-                            self.schema[key] = Or(self.schema[key], other.schema[key])
+
+        if isinstance(self.schema, dict) and isinstance(other.schema, dict):
+            for key in other.schema:
+                if key in self.schema:
+                    match conflict:
+                        case MergeFlags.KEEP:
+                            pass
+                        case MergeFlags.EXCEPTION:
+                            raise schema.SchemaError(f"Key collision for {key}")
+                        case MergeFlags.OVERWRITE:
+                            self.schema[key] = other.schema[key]
+                        case MergeFlags.ALTERNATIVE:
+                            # two dicts can be merged recursively
+                            if isinstance(self.schema[key], dict) and isinstance(other.schema[key], dict):
+                                self.schema[key] |= other.schema[key]
+                            # two Schemas can be merged recursively
+                            elif isinstance(self.schema[key], Schema) and isinstance(other.schema[key], Schema):
+                                self.schema[key] |= other.schema[key]
+                            # otherwise use Or of the two subschemas
+                            else:
+                                self.schema[key] = Or(self.schema[key], other.schema[key])
+                else:
+                    self.schema[key] = other.schema[key]
+        else:
+            if self.schema == other.schema:
+                # two identical schemas are replaced by one
+                return self
             else:
-                self.schema[key] = other.schema[key]
+                # two different schemas are simply Or-ed
+                self._schema = Or(self.schema, other.schema)
+
         return self
+
 
     def __eq__(self, other: Self) -> bool:
         """

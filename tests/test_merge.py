@@ -1,5 +1,5 @@
 import pytest
-from enschema import Schema, And, Or
+from enschema import Schema, And, Or, Optional
 
 
 @pytest.fixture
@@ -21,6 +21,25 @@ def second():
         'cat': {
             'helicopter': 'magenta',
         },
+    })
+
+
+@pytest.fixture
+def ored():
+    return Schema({
+        'duck': 'yellow',
+        'dog': Or('white', 'black'),
+        'cat': Schema({
+            'male': 'red',
+            'female': 'cyan',
+            'helicopter': 'magenta',
+        }),
+    })
+
+
+@pytest.fixture
+def anded():
+    return Schema({
     })
 
 
@@ -47,32 +66,30 @@ def woof():
 
 
 class TestMerge:
-    ored = Schema({
-        'duck': 'yellow',
-        'dog': Or('white', 'black'),
-        'cat': Schema({
-            'male': 'red',
-            'female': 'cyan',
-            'helicopter': 'magenta',
-        }),
-    })
+    def test_merge_1(self):
+        assert Schema({}) | Schema({}) == Schema({})
 
-    def test_or(self, first, second):
-        print()
-        print(first | second)
-        print(__class__.ored)
-        assert first | second == __class__.ored
+    def test_merge_2(self):
+        assert Schema('123') | Schema(123) == Schema(Or('123', 123))
 
-    def test_ior(self, first, second):
+    def test_merge_3(self):
+        assert Schema(124) | Schema(124) == Schema(124)
+
+    def test_merge_4(self):
+        assert Schema(124) | Schema(125) == Schema(Or(124, 125))
+
+    def test_or(self, first, second, ored):
+        assert first | second == ored
+
+    def test_ior(self, first, second, ored):
         first |= second
-        assert first == __class__.ored
+        assert first == ored
 
     def test_cats(self, meow, meowww):
         assert meow | meowww == Schema({'cat': Or('black', 'white')})
 
     def test_animals(self, meow, woof):
         assert meow | woof == Schema({'cat': 'white', 'dog': 'black'})
-
 
 
 class TestSchemaBasic:
@@ -82,14 +99,20 @@ class TestSchemaBasic:
     def test_basic_1(self):
         assert Schema(int) == Schema(int)
 
-    def test_basic_1(self):
+    def test_basic_2(self):
         assert Schema([int, str, '5']) == Schema([int, str, '5'])
 
-    def test_unequal(self):
+    def test_basic_list(self):
+        assert Schema([int, str, '5']) != Schema([str, int, '5'])
+
+    def test_unequal_type_value(self):
         assert Schema(int) != Schema(123)
 
-    def test_unequal(self):
+    def test_unequal_type(self):
         assert Schema(int) != Schema(float)
+
+    def test_unequal_value(self):
+        assert Schema(466) != Schema(-466)
 
 
 
@@ -123,3 +146,14 @@ class TestAnd:
 
     def test_and_or(self):
         assert And(str, int) != Or(str, int)
+
+
+class TestOptional:
+    def test_equal(self):
+        assert Optional(123) == Optional(123)
+
+    def test_unequal(self):
+        assert Optional(123) != Optional(445)
+
+    def test_against_value(self):
+        assert 123 != Optional(123)
