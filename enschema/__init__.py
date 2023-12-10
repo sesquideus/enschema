@@ -1,23 +1,15 @@
 import copy
 import schema
 
-from enum import Enum
 from typing import Self, Hashable, MutableSet, MutableSequence, MutableMapping
 
-__all__ = ['Schema',
-           'And',
-           'Or',
-           'Optional']
-
-
-class MergeFlags(Enum):
-    """
-    Conflict resolution algorithm for merging Schemas
-    """
-    KEEP = 0            # Keep parent values
-    EXCEPTION = 1       # Raise an exception
-    OVERWRITE = 2       # Keep child values
-    ALTERNATIVE = 4     # Replace with Or(self.schema[key], other.schema[key])
+__all__ = [
+    'Schema',
+    'And', 'Or', 'Optional',
+    'Regex', 'Use', 'Const',
+    'SchemaError', 'SchemaWrongKeyError', 'SchemaMissingKeyError',
+    'SchemaUnexpectedTypeError', 'SchemaForbiddenKeyError', 'SchemaOnlyOneAllowedError',
+]
 
 
 def make_hashable(x):
@@ -31,6 +23,33 @@ def make_hashable(x):
         return frozenset({y: make_hashable(z) for y, z in x.items()})
     else:
         return x
+
+
+SchemaError = schema.SchemaError
+SchemaWrongKeyError = schema.SchemaWrongKeyError
+SchemaOnlyOneAllowedError = schema.SchemaOnlyOneAllowedError
+SchemaMissingKeyError = schema.SchemaMissingKeyError
+SchemaForbiddenKeyError = schema.SchemaForbiddenKeyError
+SchemaUnexpectedTypeError = schema.SchemaUnexpectedTypeError
+
+
+class Regex(schema.Regex):
+    def __eq__(self, other: Self):
+        if not isinstance(other, Regex):
+            return NotImplemented
+        else:
+            return self._pattern_str == other._pattern_str and self._flags_names == other._flags_names
+
+    def __hash__(self):
+        return hash(self._pattern_str + self._flags_names)
+
+
+class Use(schema.Use):
+    def __eq__(self, other: Self):
+        if not isinstance(other, Use):
+            return NotImplemented
+        else:
+            return self._callable == other._callable
 
 
 class Or(schema.Or):
@@ -65,44 +84,43 @@ class Optional(schema.Optional):
         return super().__hash__()
 
 
-class Schema(schema.Schema):
-    def _merge(self, other: Self, *, conflict: MergeFlags = MergeFlags.OVERWRITE):
-        """
-        Merge a child Schema into a parent Schema, optionally overwriting any existing keys.
+class Const(schema.Const):
+    def __eq__(self, other) -> bool:
+        return self.schema == other.schema
 
-        Parameters
-        ----------
-        other : Schema
-        conflict : MergeFlags
-            Specifies what to do if a key is found both in parent and child:
-                KEEP: keep the value of parent
-                EXCEPTION: throw an exception
-                OVERWRITE: keep the value of child, discarding the value of parent (default)
-                FUSE: allow both values from parent's and child's schema
-                ALTERNATIVE: replace with Or(parent's schema, child's schema)
+
+class Schema(schema.Schema):
+    def __eq__(self, other: Self) -> bool:
         """
+            Determine whether two schemas are equal or not.
+            Caveat: equality tests are difficult in Python and difficult in general for many objects.
+            For instance (lambda x: x < 3) != (lambda x: x < 3) and there is no easy way around it.
+        """
+        if isinstance(other, Schema):
+            return self._schema == other._schema
+        else:
+            # If our schema is equal to the other object, we are good to go.
+            return self._schema == other
+
+    def __or__(self, other: Self) -> Self:
+        sch = copy.deepcopy(self)
+        sch |= other
+        return sch
+
+    def __ior__(self, other: Self):
         assert isinstance(other, Schema), "Can only merge a Schema with another Schema"
 
         if isinstance(self.schema, dict) and isinstance(other.schema, dict):
             for key in other.schema:
                 if key in self.schema:
-                    match conflict:
-                        case MergeFlags.KEEP:
-                            pass
-                        case MergeFlags.EXCEPTION:
-                            raise schema.SchemaError(f"Key collision for {key}")
-                        case MergeFlags.OVERWRITE:
-                            self.schema[key] = other.schema[key]
-                        case MergeFlags.ALTERNATIVE:
-                            # two dicts can be merged recursively
-                            if isinstance(self.schema[key], dict) and isinstance(other.schema[key], dict):
-                                self.schema[key] |= other.schema[key]
-                            # two Schemas can be merged recursively
-                            elif isinstance(self.schema[key], Schema) and isinstance(other.schema[key], Schema):
-                                self.schema[key] |= other.schema[key]
-                            # otherwise use Or of the two subschemas
-                            else:
-                                self.schema[key] = Or(self.schema[key], other.schema[key])
+                    if isinstance(self.schema[key], dict) and isinstance(other.schema[key], dict):
+                        self.schema[key] |= other.schema[key]
+                    # two Schemas can be merged recursively
+                    elif isinstance(self.schema[key], Schema) and isinstance(other.schema[key], Schema):
+                        self.schema[key] |= other.schema[key]
+                    # otherwise use Or of the two subschemas
+                    else:
+                        self.schema[key] = Or(self.schema[key], other.schema[key])
                 else:
                     self.schema[key] = other.schema[key]
         else:
@@ -114,36 +132,3 @@ class Schema(schema.Schema):
                 self._schema = Or(self.schema, other.schema)
 
         return self
-
-
-    def __eq__(self, other: Self) -> bool:
-        """
-            Determine whether two schemas are equal or not.
-            Caveat: equality tests are difficult in Python and difficult in general for many objects.
-            For instance (lambda x: x < 3) != (lambda x: x < 3) and there is no easy way around it.
-        """
-        if not isinstance(other, Schema):
-            return self._schema == other
-
-        return self._schema == other._schema
-
-    def __or__(self, other: Self) -> Self:
-        sch = copy.deepcopy(self)
-        return sch._merge(other, conflict=MergeFlags.ALTERNATIVE)
-
-    def __and__(self, other: Self) -> Self:
-        sch = copy.deepcopy(self)
-        return sch._merge(other, conflict=MergeFlags.OVERWRITE)
-
-    def __add__(self, other) -> Self:
-        sch = copy.deepcopy(self)
-        return sch._merge(other, conflict=MergeFlags.FUSE)
-
-    def __ior__(self, other: Self):
-        return self._merge(other, conflict=MergeFlags.ALTERNATIVE)
-
-    def __iand__(self, other: Self):
-        return self._merge(other, conflict=MergeFlags.OVERWRITE)
-
-    def __iadd__(self, other: Self):
-        return self._merge(other, conflict=MergeFlags.FUSE)

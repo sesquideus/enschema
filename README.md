@@ -1,0 +1,1 @@
+This package aims to expand on `schema` and provide functions for merging and other operations.
