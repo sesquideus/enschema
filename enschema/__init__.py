@@ -62,6 +62,9 @@ class Or(schema.Or):
             their = set(make_hashable(other._args))
             return mine == their
 
+    def __hash__(self):
+        return hash(self._args)
+
 
 class And(schema.And):
     def __eq__(self, other: Self) -> bool:
@@ -72,6 +75,9 @@ class And(schema.And):
             mine = set(make_hashable(self._args))
             their = set(make_hashable(other._args))
             return mine == their and self.__class__ == other.__class__
+
+    def __hash__(self):
+        return hash(self._args)
 
 
 class Optional(schema.Optional):
@@ -87,6 +93,9 @@ class Optional(schema.Optional):
 class Const(schema.Const):
     def __eq__(self, other) -> bool:
         return self.schema == other.schema
+
+    def __hash__(self):
+        return hash(make_hashable(self.schema))
 
 
 class Schema(schema.Schema):
@@ -114,12 +123,13 @@ class Schema(schema.Schema):
             for key in other.schema:
                 if key in self.schema:
                     if isinstance(self.schema[key], dict) and isinstance(other.schema[key], dict):
+                        # two dicts can be merged recursively
                         self.schema[key] |= other.schema[key]
-                    # two Schemas can be merged recursively
                     elif isinstance(self.schema[key], Schema) and isinstance(other.schema[key], Schema):
+                        # two Schemas can be merged recursively
                         self.schema[key] |= other.schema[key]
-                    # otherwise use Or of the two subschemas
                     else:
+                        # otherwise use Or of the two subschemas
                         self.schema[key] = Or(self.schema[key], other.schema[key])
                 else:
                     self.schema[key] = other.schema[key]
@@ -128,7 +138,7 @@ class Schema(schema.Schema):
                 # two identical schemas are replaced by one
                 return self
             else:
-                # two different schemas are simply Or-ed
+                # two different schemas are simply Or'ed
                 self._schema = Or(self.schema, other.schema)
 
         return self
